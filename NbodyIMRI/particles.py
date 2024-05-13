@@ -18,6 +18,8 @@ import random
 import h5py
 import copy
 
+from jax import jit
+
 
 class particles():
     def __init__(self, M_1, M_2, N_DM=2, M_DM = 0, dynamic_BH=True):
@@ -41,7 +43,7 @@ class particles():
     
         self.dvdtBH1 = None
         self.dvdtBH2 = None
-        self.dxdtDM = None
+        self.dvdtDM = None
         
         self.dynamic_BH = dynamic_BH
         
@@ -54,18 +56,25 @@ class particles():
     def M_tot(self):
         return self.M_1 + self.M_2
 
-    def xstep(self, h):
+    #@jit
+    def xstep(self, h, inds = None):
         if (self.dynamic_BH):
             self.xBH1 += self.vBH1*h
         self.xBH2 += self.vBH2*h
-        self.xDM += self.vDM*h
+        if (inds is None):
+            self.xDM += self.vDM*h
+        else:
+            self.xDM[inds] += self.vDM[inds]*h
 
-
-    def vstep(self, h):
+    #@jit
+    def vstep(self, h, inds = None):
         if (self.dynamic_BH):
             self.vBH1 += self.dvdtBH1*h
         self.vBH2 += self.dvdtBH2*h
-        self.vDM += self.dvdtDM*h
+        if (inds is None):
+            self.vDM += self.dvdtDM*h
+        else:
+            self.vDM[inds] += self.dvdtDM[inds]*h
         
     def orbital_elements(self):
         return tools.calc_orbital_elements(self.xBH1 - self.xBH2, self.vBH1 - self.vBH2, self.M_tot())
@@ -135,7 +144,7 @@ class particles():
                     self.vDM[i,:] = sgn*(SpikeDF.v_max(r[i])/np.sqrt(2))*vhat
                     
             self.xDM += self.xBH1
-            #self.vDM += self.vBH1
+            self.vDM += self.vBH1
     
     def summary(self):
         print("> Particle set:")
@@ -367,7 +376,7 @@ def particles_in_binary(M_1, M_2, a_i, e_i=0.0, N_DM=0, dynamic_BH=True, rho_6=1
         if (r_t < 0):
             r_max = 1e5*tools.calc_risco(M_1)
         else:
-            r_max = 1e3*r_t
+            r_max = 1e5*r_t
     
     if (N_DM > 0):
         if (r_t < 0):

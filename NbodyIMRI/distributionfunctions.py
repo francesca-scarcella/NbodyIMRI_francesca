@@ -37,7 +37,8 @@ class SpikeDistribution(ABC):
         pass
     
     def Psi(self, r):
-        return u.G_N * self.M_BH/r
+        pass
+    
     
     def v_max(self, r):
         return np.sqrt(2*self.Psi(r)) 
@@ -47,7 +48,7 @@ class SpikeDistribution(ABC):
 
     def f_v_ini(self, v, r):
         f_v = 0.0*v
-        mask = v < self.v_max(r)
+        mask = v <= self.v_max(r)
         E = self.Psi(r) - 0.5*v**2
         f_v[mask] = 4*np.pi*v[mask]**2*self.f_ini(E[mask])/self.rho_ini(r)
         return f_v
@@ -62,8 +63,8 @@ class SpikeDistribution(ABC):
         
     def draw_radius(self, r_max, r_min = -1, N = 1):
         if (r_min < 0):
-            r_min = self.r_min
-        r_grid = np.geomspace(r_min, r_max, 1000)
+            r_min = 1e-2*self.r_min
+        r_grid = np.geomspace(r_min, r_max, 10000)
         M_grid = self.M_DM_ini(r_grid)
         P_grid = (M_grid - M_grid[0])/(M_grid[-1] - M_grid[0])  
         u = np.random.rand(N)
@@ -72,7 +73,7 @@ class SpikeDistribution(ABC):
         
     def draw_velocity(self, r, N = 1):
         integ = lambda v: self.f_v_ini(v, r)
-        v = tools.inverse_transform_sample(integ, 0, self.v_max(r), N,  N_grid = 1000, log=False)
+        v = tools.inverse_transform_sample(integ, 0, self.v_max(r), N,  N_grid = 10000, log=False)
         return v
         
     def draw_particle(self, r_max, r_min = -1, N = 1):
@@ -117,8 +118,8 @@ class SpikeDistribution(ABC):
         
         return E, L
     
-    def reconstruct_rho(self, r):
-        v = np.linspace(0, 0.999*self.v_max(r))
+    def reconstruct_rho(self, r, N = 10000):
+        v = np.linspace(0, 0.99999*self.v_max(r), N)
         f_v = 0.0*v
         E = self.Psi(r) - 0.5*v**2
         f_v = 4*np.pi*v**2*self.f_ini(E)
@@ -149,6 +150,9 @@ class PowerLawSpike(SpikeDistribution):
         
         #Strictly speaking, r_min should be 2*r_isco (https://arxiv.org/abs/1305.2619)
         self.r_min  = self.r_isco
+    
+    def Psi(self, r):
+        return u.G_N * self.M_BH/r
     
     def f_ini(self, E):
         A1 = r_6 / (u.G_N * self.M_BH)
@@ -200,7 +204,7 @@ class GeneralizedNFWSpike(SpikeDistribution):
             return (u.G_N * self.M_BH/self.r_soft)*(3*self.r_soft**2 - r**2)/(2*self.r_soft**2)
     
     def tabulate_f(self):
-        r_vals = np.geomspace(0.1, 1e9, 10000)*self.r_isco
+        r_vals = np.geomspace(1e-3, 1e12, 10000)*self.r_isco
         rho_vals = self.rho_ini(r_vals)
         psi_vals = np.vectorize(self.Psi)(r_vals)
         psi_min = np.min(psi_vals)
@@ -218,7 +222,7 @@ class GeneralizedNFWSpike(SpikeDistribution):
             integrand = d2rho_of_psi(_psi)
             f_vals[i] = np.trapz(integrand, _Q)/(np.sqrt(2)*np.pi**2)
         
-        f_vals = np.clip(f_vals, 0, 1e30)
+        f_vals = np.clip(f_vals, 0, None)
         return interp1d(E_vals, f_vals, bounds_error=False, fill_value=0.0)
         
     

@@ -16,6 +16,12 @@ import h5py
 
 import copy
 
+import time
+import cProfile
+
+from jax import jit
+from numba import njit
+
 
 
 # Leapfrog stepsize parameters
@@ -61,9 +67,37 @@ class simulator():
         self.check_state = check_state
         self.background_field = None
         
-                    
+        #self.N_sub_max = -1
+    
+    def calc_dt_opt(self, r, M, eta = 0.01):
+        return eta*(2*np.pi*np.sqrt(r**3/(u.G_N*M)))
+                 
+    def adaptive_step(self, dt, method, eta, N_sub_max = 100):
+        
+        if (self.r2_min is None):
+            #print("Initialising r_min...")
+            self.update_acceleration()
+        
+        dt_opt = self.calc_dt_opt(self.r2_min, self.p.M_2, eta)
+        
+        if (dt_opt >= dt):
+            self.full_step(dt, method)
+        else:
+            N_sub = int(np.ceil(dt/dt_opt))
+            if (N_sub > N_sub_max):
+                N_sub = N_sub_max
             
-    def full_step(self, dt, method="PEFRL"):
+            dt_sub = dt/N_sub
+            for i in range(N_sub):
+                self.full_step(dt_sub, method)
+                
+            #if N_sub > self.N_sub_max:
+            #    self.N_sub_max = N_sub
+            #    print(self.N_sub_max)
+            
+    
+            
+    def full_step(self, dt, method="PEFRL", inds=None):
         """
         Perform a full leapfrog step, See e.g. https://arxiv.org/abs/2007.05308, http://physics.ucsc.edu/~peter/242/leapfrog.pdf
         
@@ -79,10 +113,23 @@ class simulator():
         
         #2nd order 'standard' leapfrog
         if (method == "DKD"):
-            self.p.xstep(0.5*dt)
+            #t1 = time.time()
+            self.p.xstep(0.5*dt,inds)
             self.update_acceleration()
-            self.p.vstep(1.0*dt)
-            self.p.xstep(0.5*dt)
+            self.p.vstep(1.0*dt,inds)
+            self.p.xstep(0.5*dt,inds)
+            #t2 = time.time()
+            #print("Time per step:", t2 - t1)
+            #print("Steps/s:", 1/(t2 - t1))
+            #assert 1 == 0
+            
+        elif (method == "KDK"):
+            self.update_acceleration()
+            self.p.vstep(0.5*dt,inds)
+            #self.update_acceleration()
+            self.p.xstep(1.0*dt,inds)
+            self.update_acceleration()
+            self.p.vstep(0.5*dt,inds)
 
         #4th order Ruth-Forest (FR) leapfrog
         elif (method == "FR"):
@@ -113,20 +160,101 @@ class simulator():
             self.p.vstep((1-2*lam)*dt/2)
             self.p.xstep(xi*dt)
         
+        
+    def calc_acc(self, M_eff, dx, r_sq, r_soft_sq, method):
+        #return 0.0
+        #Calculate forces (including softening)
+        if (method == "plummer"):
+            acc_DM = -u.G_N*M_eff*dx*(r_sq + r_soft_sq)**-1
+            
+        elif (method == "plummer2"):
+            acc_DM = -u.G_N*M_eff*np.sqrt(r_sq)*(dx/2)*(2*r_sq + 5*r_soft_sq)*(r_sq + r_soft_sq)**(-5/2)
+            
+        elif (method == "uniform_old"):
+            x = np.sqrt(r_sq/r_soft_sq)
+            acc_DM = -u.G_N*M_eff*dx*(r_sq)**-1
+            inds = x < 1
+            if (np.sum(inds) > 1):
+                inds = inds.flatten()
+                acc_DM[inds] = -u.G_N*M_eff*dx[inds,:]*x[inds]*(8 - 9*x[inds] + 2*(x[inds])**3)/(r_soft_sq)
+
+        elif (method == "uniform"):
+            x = np.sqrt(r_sq/r_soft_sq)
+            acc_DM = -u.G_N*M_eff*dx*(r_sq)**-1
+            inds = x <= 1
+            if (np.sum(inds) > 1):
+                inds = inds.flatten()
+                acc_DM[inds] = -u.G_N*M_eff*dx[inds,:]*x[inds]/(r_soft_sq)
                 
-    def update_acceleration(self):
+        elif (method == "truncate"):
+            r_sq = np.clip(r_sq, r_soft_sq, 1e50)
+            acc_DM = -u.G_N*M_eff*dx/r_sq
+
+        elif (method == "empty_shell"):
+            x = np.sqrt(r_sq/r_soft_sq)
+            acc_DM = -u.G_N*M_eff*dx*(r_sq)**-1
+            inds = x < 1
+            if (np.sum(inds) >= 1):
+                inds = inds.flatten()      
+                acc_DM[inds] *= 0.0
+
+        else:
+            raise ValueError("Invalid softening method:" + method)
+                
+        return acc_DM
+        
+        
+    def calc_acc_single(self, M_eff, dx, r_sq, r_soft_sq, method):
+        #Calculate forces (including softening)
+        if (method == "plummer"):
+            acc_DM = -u.G_N*M_eff*dx*(r_sq + r_soft_sq)**-1
+            
+        elif (method == "plummer2"):
+            acc_DM = -u.G_N*M_eff*np.sqrt(r_sq)*(dx/2)*(2*r_sq + 5*r_soft_sq)*(r_sq + r_soft_sq)**(-5/2)
+            
+        elif (method == "uniform_old"):
+            x = np.sqrt(r_sq/r_soft_sq)
+            if (x >= 1):
+                acc_DM = -u.G_N*M_eff*dx*(r_sq)**-1
+            else:
+                acc_DM = -u.G_N*M_eff*dx*x*(8 - 9*x + 2*(x)**3)/(r_soft_sq)
+
+        elif (method == "uniform"):
+            x = np.sqrt(r_sq/r_soft_sq)
+            if (x >= 1):
+                acc_DM = -u.G_N*M_eff*dx*(r_sq)**-1
+            else:
+                acc_DM = -u.G_N*M_eff*dx*x/(r_soft_sq)
+                
+        elif (method == "truncate"):
+            r_sq = np.clip(r_sq, r_soft_sq, 1e50)
+            acc_DM = -u.G_N*M_eff*dx/r_sq
+
+        elif (method == "empty_shell"):
+            x = np.sqrt(r_sq/r_soft_sq)
+            if (x >= 1):
+                acc_DM = -u.G_N*M_eff*dx*(r_sq)**-1
+            else:
+                acc_DM = 0.0
+
+        else:
+            raise ValueError("Invalid softening method:" + method)
+                
+        return acc_DM
+
+    
+    def update_acceleration_loop(self, inds_level=None):
         """
         Update the acceleration of all particles in p, based on current positions.
         
         Returns:
             None
         """
+
+        #xDM_level = self.p.xDM
         
-        #Calculate separations between DM particles and central BH
-        dx1     = (self.p.xDM - self.p.xBH1)
-        r1      = np.linalg.norm(dx1, axis=-1, keepdims=True)
-        dx1    /= r1
-        r1_sq   = r1**2
+        self.p.dvdtBH1 = 0.0
+        self.p.dvdtBH2 = 0.0
         
         if (self.p.dynamic_BH):
             M1_eff  = self.p.M_1
@@ -137,96 +265,12 @@ class simulator():
             M1_eff  = self.p.M_1 + self.p.M_2
             M2_eff  = (self.p.M_1*self.p.M_2)/(self.p.M_1 + self.p.M_2)
 
-        #Calculate forces (including softening)
-        if (self.soft_method1 == "plummer"):
-            acc_DM1 = -u.G_N*M1_eff*dx1*(r1_sq + self.r_soft_sq1)**-1
-            
-        elif (self.soft_method1 == "plummer2"):
-            acc_DM1 = -u.G_N*M1_eff*r1*(dx1/2)*(2*r1_sq + 5*self.r_soft_sq1)*(r1_sq + self.r_soft_sq1)**(-5/2)
-            
-        elif (self.soft_method1 == "uniform_old"):
-            x = np.sqrt(r1_sq/self.r_soft_sq1)
-            acc_DM1 = -u.G_N*M1_eff*dx1*(r1_sq)**-1
-            inds = x < 1
-            if (np.sum(inds) > 1):
-                inds = inds.flatten()
-                acc_DM1[inds] = -u.G_N*M1_eff*dx1[inds,:]*x[inds]*(8 - 9*x[inds] + 2*(x[inds])**3)/(self.r_soft_sq1)
-
-        elif (self.soft_method1 == "uniform"):
-            x = np.sqrt(r1_sq/self.r_soft_sq1)
-            acc_DM1 = -u.G_N*M1_eff*dx1*(r1_sq)**-1
-            inds = x < 1
-            if (np.sum(inds) > 1):
-                inds = inds.flatten()
-                acc_DM1[inds] = -u.G_N*M1_eff*dx1[inds,:]*x[inds]/(self.r_soft_sq1)
-                
-        elif (self.soft_method1 == "truncate"):
-            r1_sq = np.clip(r1_sq, self.r_soft_sq1, 1e50)
-            acc_DM1 = -u.G_N*M1_eff*dx1/r1_sq
-
-        elif (self.soft_method1 == "empty_shell"):
-            x = np.sqrt(r1_sq/self.r_soft_sq1)
-            acc_DM1 = -u.G_N*M1_eff*dx1*(r1_sq)**-1
-            inds = x < 1
-            if (np.sum(inds) >= 1):
-                inds = inds.flatten()      
-                acc_DM1[inds] *= 0.0
-
-        else:
-            raise ValueError("Invalid softening method:" + self.soft_method1)
+        #Calculate forces between the 2 BHs  
+        dx12    = (self.p.xBH1 - self.p.xBH2)
+        r12_sq  = np.linalg.norm(dx12)**2
+        acc_BH = -u.G_N*M2_eff*dx12*(r12_sq)**-1.5   
         
-        #Calculate forces on second BH (if it exists)
-        if (self.p.M_2 > 0):
-            dx2     = (self.p.xDM - self.p.xBH2)
-            r2      = np.linalg.norm(dx2, axis=-1, keepdims=True)
-            dx2     /= r2
-            r2_sq   = r2**2 
-
-
-            if (self.soft_method == "plummer"):
-                acc_DM2 = -u.G_N*M2_eff*dx2*(r2_sq + self.r_soft_sq2)**-1
-
-            elif (self.soft_method == "plummer2"):
-                acc_DM2 = -u.G_N*M2_eff*r2*(dx2/2)*(2*r2_sq + 5*self.r_soft_sq2)*(r2_sq + self.r_soft_sq2)**(-5/2)
-
-            elif (self.soft_method == "uniform_old"):
-                x = np.sqrt(r2_sq/self.r_soft_sq2)
-                acc_DM2 = -u.G_N*M2_eff*dx2*(r2_sq)**-1
-                inds = x < 1
-                if (np.sum(inds) > 1):
-                    inds = inds.flatten()
-                    acc_DM2[inds] = -u.G_N*M2_eff*dx2[inds,:]*x[inds]*(8 - 9*x[inds] + 2*(x[inds])**3)/(self.r_soft_sq2)
-
-            elif (self.soft_method == "uniform"):
-                x = np.sqrt(r2_sq/self.r_soft_sq2)
-                acc_DM2 = -u.G_N*M2_eff*dx2*(r2_sq)**-1
-                inds = x < 1
-                if (np.sum(inds) > 1):
-                    inds = inds.flatten()
-                    acc_DM2[inds] = -u.G_N*M2_eff*dx2[inds,:]*x[inds]/(self.r_soft_sq2)
-
-            elif (self.soft_method == "truncate"):
-                r2_sq = np.clip(r2_sq, self.r_soft_sq2, 1e50)
-                acc_DM2 = -u.G_N*M2_eff*dx2/r2_sq
-
-            elif (self.soft_method == "empty_shell"):
-                x = np.sqrt(r2_sq/self.r_soft_sq2)
-                acc_DM2 = -u.G_N*M2_eff*dx2*(r2_sq)**-1
-                inds = x < 1
-                if (np.sum(inds) >= 1):
-                    inds = inds.flatten()      
-                    acc_DM2[inds] *= 0.0
-
-            else:
-                raise ValueError("Invalid softening method:" + self.soft_method)
-
-            #Calculate forces between the 2 BHs  
-            dx12    = (self.p.xBH1 - self.p.xBH2)
-            r12_sq  = np.linalg.norm(dx12, axis=-1, keepdims=True)**2
-            acc_BH = -u.G_N*M2_eff*dx12*(r12_sq)**-1.5
-        else:
-            acc_BH = 0.0
-            acc_DM2 = 0.0
+        self.p.dvdtDM = np.zeros((self.p.N_DM, 3))
         
         #Save the values of the acceleration
         if (self.p.dynamic_BH):
@@ -235,22 +279,233 @@ class simulator():
         else:
             self.p.dvdtBH1 = 0.0
         
+
         if (self.p.M_2 > 0):
-            self.p.dvdtBH2 = -(M1_eff/M2_eff)*acc_BH - (1/M2_eff)*np.sum(np.atleast_2d(self.p.M_DM).T*acc_DM2, axis=0)
+            #self.p.dvdtBH2 = -(M1_eff/M2_eff)*acc_BH - (1/M2_eff)*np.sum(np.atleast_2d(self.p.M_DM).T*self.acc_DM2, axis=0)
+            self.p.dvdtBH2 = -(M1_eff/M2_eff)*acc_BH 
+        else:
+            self.p.dvdtBH2 = 0.0 
+
+        for iDM in range(self.p.N_DM):
+            #Calculate separations between DM particles and central BH
+            dx1     = (self.p.xDM[iDM,:] - self.p.xBH1)
+            r1      = np.linalg.norm(dx1)
+            dx1    /= r1
+            r1_sq   = r1**2    
+
+            acc_DM1 = self.calc_acc_single(M1_eff, dx1, r1_sq, self.r_soft_sq1, self.soft_method1)
+        
+            #Calculate forces on second BH (if it exists)
+            if (self.p.M_2 > 0):
+                dx2     = (self.p.xDM[iDM,:] - self.p.xBH2)
+                r2      = np.linalg.norm(dx2)
+                dx2     /= r2
+                r2_sq   = r2**2 
+
+                acc_DM2 = self.calc_acc_single(M2_eff, dx2, r2_sq, self.r_soft_sq2, self.soft_method)        
+                self.p.dvdtBH2 += - (self.p.M_DM[iDM]/M2_eff)*acc_DM2
+            
+            else:
+                acc_BH = 0.0
+                #self.acc_DM2 = 0.0
+                
+                
+            self.p.dvdtDM[iDM,:]  = acc_DM1 + acc_DM2
+    
+        
+        #Now, if a background force field has been set, calculate the acceleration
+        #if self.background_field is not None:
+        #    self.p.dvdtBH1 += self.background_field(self.p.xBH1)
+        #    self.p.dvdtBH2 += self.background_field(self.p.xBH2)
+        #    self.p.dvdtDM  += self.background_field(xDM_level)
+        
+    def update_acceleration_test(self):
+        """
+        Update the acceleration of all particles in p, based on current positions.
+        
+        Returns:
+            None
+        """
+        
+        if (self.p.dynamic_BH):
+            M1_eff  = self.p.M_1
+            M2_eff  = self.p.M_2
+        else:
+            #M1_eff  = self.p.M_1
+            #M2_eff  = self.p.M_2
+            M1_eff  = self.p.M_1 + self.p.M_2
+            M2_eff  = (self.p.M_1*self.p.M_2)/(self.p.M_1 + self.p.M_2)
+
+        
+        #Calculate separations between DM particles and central BH
+        dx1     = (self.p.xDM - self.p.xBH1)
+        #r1      = np.linalg.norm(dx1, axis=-1, keepdims=True)
+        #r1_sq   = np.einsum("ij,kj", dx1, dx1)
+        r1_sq   = np.sum(dx1**2, axis=-1, keepdims=True)
+        r1      = np.sqrt(r1_sq)
+        dx1    /= r1
+        #r1_sq   = r1**2    
+        
+        acc_DM1_level = 0.0
+        #acc_DM1_level = self.calc_acc(M1_eff, dx1, r1_sq, self.r_soft_sq1, self.soft_method)
+        
+        #if (inds_level is None):
+        #    self.acc_DM1 = acc_DM1_level
+        #else:
+        #    self.acc_DM1[inds_level] = acc_DM1_level 
+        
+        acc_DM2_level = 0.0
+        #Calculate forces on second BH (if it exists)
+        if (self.p.M_2 > 0):
+            
+            dx2     = (self.p.xDM - self.p.xBH2)
+            #r2      = np.linalg.norm(dx2, axis=-1, keepdims=True)
+            #r2_sq   = np.einsum("ij,kj", dx2, dx2)
+            r2_sq   = np.sum(dx2**2, axis=-1, keepdims=True)
+            r2      = np.sqrt(r2_sq)
+            dx2     /= r2
+            #r2_sq   = r2**2 
+
+            acc_DM2_level = 0.0
+            #acc_DM2_level = self.calc_acc(M2_eff, dx2, r2_sq, self.r_soft_sq2, self.soft_method)
+
+            #if (inds_level is None):
+            #    self.acc_DM2 = acc_DM2_level
+            #else:
+            #    self.acc_DM2[inds_level] = acc_DM2_level
+
+            #Calculate forces between the 2 BHs  
+            dx12    = (self.p.xBH1 - self.p.xBH2)
+            #r12_sq  = np.linalg.norm(dx12, axis=-1, keepdims=True)**2
+            r12_sq  = np.sum(dx12**2)
+            acc_BH  = -u.G_N*M2_eff*dx12*(r12_sq)**-1.5
+            
+        else:
+            acc_BH = 0.0
+            self.acc_DM2 = 0.0
+        
+        #Save the values of the acceleration
+        if (self.p.dynamic_BH):
+            #Acceleration of central BH due only to m2
+            self.p.dvdtBH1 = acc_BH #- (1/M1_eff)*np.sum(np.atleast_2d(self.p.M_DM).T*acc_DM1, axis=0)
+        else:
+            self.p.dvdtBH1 = 0.0
+        
+
+        if (self.p.M_2 > 0):
+            #BJK:***
+            #if (inds_level is None):
+            self.p.dvdtBH2 = -(M1_eff/M2_eff)*acc_BH - (1/M2_eff)*np.sum(np.atleast_2d(self.p.M_DM).T*acc_DM2_level, axis=0)
+            #else:
+            #    self.p.dvdtBH2 = -(M1_eff/M2_eff)*acc_BH - (1/M2_eff)*np.sum(np.atleast_2d(self.p.M_DM[inds_level]).T*self.acc_DM2[inds_level], axis=0)
         else:
             self.p.dvdtBH2 = 0.0
         
-        self.p.dvdtDM  = acc_DM1 + acc_DM2            
+        #if (inds_level is None):
+        self.p.dvdtDM  = acc_DM1_level + acc_DM2_level
+        #else:
+            #self.p.dvdtDM[inds_level]  = self.acc_DM1[inds_level] + self.acc_DM2[inds_level]
+    
+        
+    #@njit       
+    def update_acceleration(self, inds_level=None):
+        """
+        Update the acceleration of all particles in p, based on current positions.
+        
+        Returns:
+            None
+        """
+        
+        if (inds_level is None):
+            xDM_level = self.p.xDM
+        else:
+            xDM_level = self.p.xDM[inds_level]
+        
+        if (self.p.dynamic_BH):
+            M1_eff  = self.p.M_1
+            M2_eff  = self.p.M_2
+        else:
+            #M1_eff  = self.p.M_1
+            #M2_eff  = self.p.M_2
+            M1_eff  = self.p.M_1 + self.p.M_2
+            M2_eff  = (self.p.M_1*self.p.M_2)/(self.p.M_1 + self.p.M_2)
+
+        #Calculate separations between DM particles and central BH
+        dx1     = (xDM_level - self.p.xBH1)
+        #r1      = np.linalg.norm(dx1, axis=-1, keepdims=True)
+        #r1_sq   = np.einsum("ij,kj", dx1, dx1)
+        r1_sq   = np.sum(dx1**2, axis=-1, keepdims=True)
+        r1      = np.sqrt(r1_sq)
+        dx1    /= r1
+        self.r1_min = np.min(r1)
+        #r1_sq   = r1**2    
+
+        acc_DM1_level = self.calc_acc(M1_eff, dx1, r1_sq, self.r_soft_sq1, self.soft_method1)
+        
+        if (inds_level is None):
+            self.acc_DM1 = acc_DM1_level
+        else:
+            self.acc_DM1[inds_level] = acc_DM1_level 
+        
+        #Calculate forces on second BH (if it exists)
+        if (self.p.M_2 > 0):
+            dx2     = (xDM_level - self.p.xBH2)
+            #r2      = np.linalg.norm(dx2, axis=-1, keepdims=True)
+            #r2_sq   = np.einsum("ij,kj", dx2, dx2)
+            r2_sq   = np.sum(dx2**2, axis=-1, keepdims=True)
+            r2      = np.sqrt(r2_sq)
+            dx2     /= r2
+            self.r2_min = np.min(r2)
+            #r2_sq   = r2**2 
+
+            acc_DM2_level = self.calc_acc(M2_eff, dx2, r2_sq, self.r_soft_sq2, self.soft_method)
+
+            if (inds_level is None):
+                self.acc_DM2 = acc_DM2_level
+            else:
+                self.acc_DM2[inds_level] = acc_DM2_level
+
+            #Calculate forces between the 2 BHs  
+            dx12    = (self.p.xBH1 - self.p.xBH2)
+            #r12_sq  = np.linalg.norm(dx12, axis=-1, keepdims=True)**2
+            r12_sq  = np.sum(dx12**2)
+            acc_BH  = -u.G_N*M2_eff*dx12*(r12_sq)**-1.5
+            
+        else:
+            acc_BH = 0.0
+            self.acc_DM2 = 0.0
+        
+        #Save the values of the acceleration
+        if (self.p.dynamic_BH):
+            #Acceleration of central BH due only to m2
+            self.p.dvdtBH1 = acc_BH #- (1/M1_eff)*np.sum(np.atleast_2d(self.p.M_DM).T*acc_DM1, axis=0)
+        else:
+            self.p.dvdtBH1 = 0.0
+        
+
+        if (self.p.M_2 > 0):
+            #BJK:***
+            if (inds_level is None):
+                self.p.dvdtBH2 = -(M1_eff/M2_eff)*acc_BH - (1/M2_eff)*np.sum(np.atleast_2d(self.p.M_DM).T*self.acc_DM2, axis=0)
+            else:
+                self.p.dvdtBH2 = -(M1_eff/M2_eff)*acc_BH - (1/M2_eff)*np.sum(np.atleast_2d(self.p.M_DM[inds_level]).T*self.acc_DM2[inds_level], axis=0)
+        else:
+            self.p.dvdtBH2 = 0.0
+        
+        if (inds_level is None):
+            self.p.dvdtDM  = self.acc_DM1 + self.acc_DM2
+        else:
+            self.p.dvdtDM[inds_level]  = self.acc_DM1[inds_level] + self.acc_DM2[inds_level]
         
         #Now, if a background force field has been set, calculate the acceleration
         if self.background_field is not None:
             self.p.dvdtBH1 += self.background_field(self.p.xBH1)
             self.p.dvdtBH2 += self.background_field(self.p.xBH2)
-            self.p.dvdtDM  += self.background_field(self.p.xDM)
+            self.p.dvdtDM[inds_level]  += self.background_field(xDM_level)
         
     
             
-    def run_simulation(self, dt, t_end, method="PEFRL", save_to_file = False, add_to_list = False, show_progress=False, save_DM_states=False, N_save=1, label=None):
+    def run_simulation(self, dt, t_end, method="PEFRL", save_to_file = False, add_to_list = False, show_progress=False, save_DM_states=False, N_save=1, label=None, inds=None, eta = -1, N_sub_max = 100):
         """
         Run the simulator, starting from the current state of particles in p, running for a time t_end.
         Times and timesteps are in physical times (as opposed to being in terms of number of orbits etc.)
@@ -289,22 +544,33 @@ class simulator():
         N_step = int(np.ceil(t_end/dt)) 
         
         #Initialise lists to save the BH positions
-        self.ts        = np.linspace(0, t_end, N_step)
-        self.xBH1_list = np.zeros((N_step, 3))
-        self.vBH1_list = np.zeros((N_step, 3))
-    
-        self.xBH2_list = np.zeros((N_step, 3))
-        self.vBH2_list = np.zeros((N_step, 3))
+        _test = np.linspace(0, 1, N_step)
+        N_out = len(_test[::N_save])
+
+        self.ts        = np.linspace(0, t_end, N_step)[::N_save]
+
+        self.xBH1_list = np.zeros((N_out, 3))
+        self.vBH1_list = np.zeros((N_out, 3))
+
+        self.xBH2_list = np.zeros((N_out, 3))
+        self.vBH2_list = np.zeros((N_out, 3))
+
+        self.M1_list   = np.zeros(N_out)
+        self.M2_list   = np.zeros(N_out)
+
+        self.N_save    = N_save
+        self.N_out     = N_out
         
-        self.M1_list   = np.zeros(N_step)
-        self.M2_list   = np.zeros(N_step)
-        
+        self.acc_DM1   = np.zeros(self.p.N_DM)
+        self.acc_DM2   = np.zeros(self.p.N_DM)
+        self.r1_min     = None
+        self.r2_min     = None
         
         #N_save = 100 #Save only every 100 timesteps
         #N_save = 1
         #N_out = int(N_step/N_save)
-        N_out = len(self.ts[::N_save])
-        N_update = 100_000 #Update the output file only every 100_000 steps
+        #N_out = len(self.ts[::N_save])
+        N_update = 10_000 #Update the output file only every 100_000 steps
         #N_update = 1
 
         #Determine initial orbital parameters of the system
@@ -339,19 +605,26 @@ class simulator():
         #Save the time steps and the initial DM configuration
         if (save_to_file):
             print(N_step, len(self.t_data[:]), len(1.0*self.ts[::N_save]))
-            self.t_data[:] = 1.0*self.ts[::N_save]
+            self.t_data[:] = 1.0*self.ts
             self.M1_list[0] = self.p.M_1
             self.M2_list[0] = self.p.M_2
         
             if (save_DM_states):
                 self.xDM_i_data[:,:] = 1.0*self.p.xDM
                 self.vDM_i_data[:,:] = 1.0*self.p.vDM
-        
+    
     
         #Define a dummy in case we're not using a progress bar
         stepper = lambda x: x
         if (show_progress):
             stepper = tqdm
+    
+        
+        #t1 = time.time()
+        #cProfile.runctx('self.update_acceleration_test()', globals(), locals(), sort='cumtime')
+        #t2 = time.time()
+        #print("Time for acceleration:", t2 - t1)
+        #print("Equivalent iterations per second:", 1/(t2-t1))
         
         #print("N_steps:", N_step)
         #Simulate for N_step time-steps
@@ -361,30 +634,43 @@ class simulator():
             if (self.check_state is not None):
                 self.check_state(self)
               
-            #Save current binary configuration to array
-            self.M1_list[it]     = self.p.M_1
-            self.M2_list[it]     = self.p.M_2
+            if (it%self.N_save == 0):
+                i_out = it//self.N_save
+
+                #Save current binary configuration to array                                                                                                   
+                self.M1_list[i_out]     = self.p.M_1
+                self.M2_list[i_out]     = self.p.M_2
+
+                self.xBH1_list[i_out,:] = self.p.xBH1
+                self.vBH1_list[i_out,:] = self.p.vBH1
+
+                self.xBH2_list[i_out,:] = self.p.xBH2
+                self.vBH2_list[i_out,:] = self.p.vBH2
             
-            self.xBH1_list[it,:] = self.p.xBH1
-            self.vBH1_list[it,:] = self.p.vBH1
-        
-            self.xBH2_list[it,:] = self.p.xBH2
-            self.vBH2_list[it,:] = self.p.vBH2
-        
             #Update data saved in file
-            if ((it%N_update == 0) and (save_to_file)):
-                #print(N_step, N_save, N_out, N_update)
-                self.M_1_data[:]    = 1.0*self.M1_list[::N_save]
-                self.M_2_data[:]    = 1.0*self.M2_list[::N_save]
+            if ((it%N_update == 0)):
                 
-                self.xBH1_data[:,:] = 1.0*self.xBH1_list[::N_save,:]
-                self.vBH1_data[:,:] = 1.0*self.vBH1_list[::N_save,:]
-            
-                self.xBH2_data[:,:] = 1.0*self.xBH2_list[::N_save,:]
-                self.vBH2_data[:,:] = 1.0*self.vBH2_list[::N_save,:]
+                if (save_to_file):
+                    #print(N_step, N_save, N_out, N_update)
+                    self.M_1_data[:]    = 1.0*self.M1_list
+                    self.M_2_data[:]    = 1.0*self.M2_list
+
+                    self.xBH1_data[:,:] = 1.0*self.xBH1_list
+                    self.vBH1_data[:,:] = 1.0*self.vBH1_list
+
+                    self.xBH2_data[:,:] = 1.0*self.xBH2_list
+                    self.vBH2_data[:,:] = 1.0*self.vBH2_list
             
             #Step forward by dt
-            self.full_step(dt, method)
+            
+            #corr = 1 + 2*np.random.randn()
+            #dt_new = np.random.choice(np.geomspace(1e-5, 1)*dt)
+            #dt_new = np.clip(corr*dt, 1e-5*dt, dt)
+            #print(dt_new/dt)
+            if (eta < 0):
+                self.full_step(dt, method, inds)
+            else:
+                self.adaptive_step(dt, method, eta, N_sub_max)
             
             #Increment the current step number (this is primarily so that the 
             #check_state function has some idea about how far in the simulation we are...)
@@ -393,14 +679,15 @@ class simulator():
 
         #One final update of the output data   
         if (save_to_file):
-            self.M_1_data[:]    = 1.0*self.M1_list[::N_save]
-            self.M_2_data[:]    = 1.0*self.M2_list[::N_save]
             
-            self.xBH1_data[:,:] = 1.0*self.xBH1_list[::N_save,:]
-            self.vBH1_data[:,:] = 1.0*self.vBH1_list[::N_save,:]
+            self.M_1_data[:]    = 1.0*self.M1_list
+            self.M_2_data[:]    = 1.0*self.M2_list
+            
+            self.xBH1_data[:,:] = 1.0*self.xBH1_list
+            self.vBH1_data[:,:] = 1.0*self.vBH1_list
     
-            self.xBH2_data[:,:] = 1.0*self.xBH2_list[::N_save,:]
-            self.vBH2_data[:,:] = 1.0*self.vBH2_list[::N_save,:]
+            self.xBH2_data[:,:] = 1.0*self.xBH2_list
+            self.vBH2_data[:,:] = 1.0*self.vBH2_list
     
             if (save_DM_states):
                 self.xDM_f_data[:,:] = 1.0*self.p.xDM
@@ -529,7 +816,7 @@ class simulator():
             plt.tight_layout()
             
             plt.show()
-            return fig
+            return fig, axes
             
     def plot_trajectory(self):
         """
