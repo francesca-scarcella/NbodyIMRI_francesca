@@ -48,7 +48,7 @@ class SpikeDistribution(ABC):
 
     def f_v_ini(self, v, r):
         f_v = 0.0*v
-        mask = v <= self.v_max(r)
+        mask = v < self.v_max(r)
         E = self.Psi(r) - 0.5*v**2
         f_v[mask] = 4*np.pi*v[mask]**2*self.f_ini(E[mask])/self.rho_ini(r)
         return f_v
