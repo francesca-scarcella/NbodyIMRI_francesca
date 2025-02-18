@@ -515,7 +515,7 @@ class simulator():
             save_DM_states (bool):  Set to True in order to save the initial and final configuration of the DM particles in the output. Default = False
             N_save (int):    Number of time steps in between saving the data to file. Default = 1
             label (str):    String to be used in the name of the output file (along with the IDhash).
-            N_step_partition (int): Number of timesteps to be performed on the inner set of particles for each main step. Default = 1. 
+            N_step_partition (int): Number of timesteps to be performed on the inner set of particles for each main step. Default = 1.
         Returns:
             None
 
@@ -557,7 +557,7 @@ class simulator():
         N_out = len(self.ts[::N_save])
         N_update = 100_000 #Update the output file only every 100_000 steps
         #N_update = 1
-        N_update_mask=100
+        N_update_mask=1
         #Determine initial orbital parameters of the system
         if (self.p.M_2 > 0):
 
@@ -674,7 +674,7 @@ class simulator():
         if self.N_partition>1:
 
             self.p.xDM[self.p.mask]=self.p.xDM_in
-            self.p.xDM[self.p.mask]=self.p.xDM_out
+            self.p.xDM[~self.p.mask]=self.p.xDM_out
 
         #One final update of the output data
         if (save_to_file):
