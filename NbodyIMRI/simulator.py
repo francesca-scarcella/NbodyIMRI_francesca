@@ -131,7 +131,7 @@ class simulator():
             None
 
         """
-
+        #print("taking a small step")
 
         #2nd order 'standard' leapfrog
         if (method == "DKD"):
@@ -169,6 +169,8 @@ class simulator():
             self.p.vstep_in((1-2*lam)*dt/2)
             self.p.xstep_in(xi*dt)
 
+        #print("took a small step")
+
 
     def full_step_out(self, dt, method="PEFRL"):
         """
@@ -184,6 +186,8 @@ class simulator():
             None
 
         """
+
+        #print("taking a big step")
 
 
         #2nd order 'standard' leapfrog
@@ -208,6 +212,7 @@ class simulator():
 
         #Improved 4th order "Position Extended Forest-Ruth Like" (PEFRL) leapfrog
         elif (method == "PEFRL"):
+
             self.p.xstep_out(xi*dt)
             self.update_acceleration()
             self.p.vstep_out((1-2*lam)*dt/2)
@@ -222,15 +227,24 @@ class simulator():
             self.p.vstep_out((1-2*lam)*dt/2)
             self.p.xstep_out(xi*dt)
 
+        #print("took a big step")
+
+
 
 
     def update_acceleration(self):
         """
-        Update the acceleration of all particles in p, based on current positions.
+        Update the acceleration of all particles in p, based on current positions of the outer particles and BHs.
+        The positions of the inner particles are not updated within the main step.
+
 
         Returns:
             None
         """
+
+        #print("updating acceleration")
+        if self.N_partition>1:
+            self.p.xDM[~self.p.mask]= self.p.xDM_out
 
         #Calculate separations between DM particles and central BH
         dx1     = (self.p.xDM - self.p.xBH1)
@@ -358,8 +372,8 @@ class simulator():
             self.p.dvdtBH2 += self.background_field(self.p.xBH2)
             self.p.dvdtDM  += self.background_field(self.p.xDM)
 
-
-        self.p.dvdtDM_out=self.p.dvdtDM[~self.p.mask]
+        if self.N_partition>1:
+            self.p.dvdtDM_out=self.p.dvdtDM[~self.p.mask]
 
 
     def update_acceleration_in(self):
@@ -558,6 +572,7 @@ class simulator():
         N_update = 100_000 #Update the output file only every 100_000 steps
         #N_update = 1
         N_update_mask=1
+        print("N update mask= ", N_update_mask)
         #Determine initial orbital parameters of the system
         if (self.p.M_2 > 0):
 
@@ -641,21 +656,35 @@ class simulator():
                 if (it%N_update_mask == 0):
 
                     #select the particles to be followed in HR
-
-                    self.p.mask=tools.norm(self.p.xDM - self.p.xBH1)<self.r_soft
+                    self.p.mask=tools.norm(self.p.xDM - self.p.xBH1)<5*self.r_soft
+                    #print("updated the mask")
 
                     self.p.xDM_in=self.p.xDM[self.p.mask]
                     self.p.xDM_out=self.p.xDM[~self.p.mask]
 
                     self.p.vDM_in=self.p.vDM[self.p.mask]
                     self.p.vDM_out=self.p.vDM[~self.p.mask]
+                    #print("selected particles")
 
                 #normal time step for the external particles and the BHs
                 self.full_step_out(dt, method)
 
                 for it2 in range(self.N_partition):
                     #short time steps for the inner ones
-                    self.full_step_in(dt, method)
+                    self.full_step_in(dt/self.N_partition, method)
+
+
+                #copy the updated coordinates back into the main arrays
+
+                self.p.xDM[self.p.mask]=self.p.xDM_in
+                self.p.xDM[~self.p.mask]=self.p.xDM_out
+
+                self.p.vDM[self.p.mask]=self.p.vDM_in
+                self.p.vDM[~self.p.mask]=self.p.vDM_out
+
+                #print("updated positions and velocities")
+
+
 
             else:
 
@@ -673,7 +702,7 @@ class simulator():
         #copy the DM coordinates into the main arrays
         if self.N_partition>1:
 
-            self.p.xDM[self.p.mask]=self.p.xDM_in
+            #self.p.xDM[self.p.mask]=self.p.xDM_in
             self.p.xDM[~self.p.mask]=self.p.xDM_out
 
         #One final update of the output data

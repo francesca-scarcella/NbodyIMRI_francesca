@@ -25,7 +25,7 @@ class particles():
         self.M_1 = M_1
         self.M_2 = M_2
 
-        print("10:01pm version")
+        print("4:30pm version")
 
 
         #self.M_tot = M_1 + M_2
@@ -178,7 +178,7 @@ class particles():
             #self.vDM += self.vBH1
 
             #assign paricles to inner and outer arrays
-            self.mask=tools.norm(self.xDM - self.xBH1)<r_soft
+            self.mask=tools.norm(self.xDM - self.xBH1)<5*r_soft
 
             self.xDM_in=self.xDM[self.mask]
             self.xDM_out=self.xDM[~self.mask]
