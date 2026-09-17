@@ -57,8 +57,6 @@ class simulator():
         self.soft_method = soft_method
 
 
-        self.r_soft= r_soft_sq1**0.5
-
         #Softening with the primary is always set to "uniform"
         self.soft_method1 = "uniform"
         self.check_state = check_state
@@ -274,7 +272,7 @@ class simulator():
             x = np.sqrt(r1_sq/self.r_soft_sq1)
             acc_DM1 = -u.G_N*M1_eff*dx1*(r1_sq)**-1
             inds = x < 1
-            if (np.sum(inds) > 1):
+            if (np.sum(inds) >= 1):
                 inds = inds.flatten()
                 acc_DM1[inds] = -u.G_N*M1_eff*dx1[inds,:]*x[inds]*(8 - 9*x[inds] + 2*(x[inds])**3)/(self.r_soft_sq1)
 
@@ -282,7 +280,7 @@ class simulator():
             x = np.sqrt(r1_sq/self.r_soft_sq1)
             acc_DM1 = -u.G_N*M1_eff*dx1*(r1_sq)**-1
             inds = x < 1
-            if (np.sum(inds) > 1):
+            if (np.sum(inds) >= 1):
                 inds = inds.flatten()
                 acc_DM1[inds] = -u.G_N*M1_eff*dx1[inds,:]*x[inds]/(self.r_soft_sq1)
 
@@ -319,7 +317,7 @@ class simulator():
                 x = np.sqrt(r2_sq/self.r_soft_sq2)
                 acc_DM2 = -u.G_N*M2_eff*dx2*(r2_sq)**-1
                 inds = x < 1
-                if (np.sum(inds) > 1):
+                if (np.sum(inds) >= 1):
                     inds = inds.flatten()
                     acc_DM2[inds] = -u.G_N*M2_eff*dx2[inds,:]*x[inds]*(8 - 9*x[inds] + 2*(x[inds])**3)/(self.r_soft_sq2)
 
@@ -327,7 +325,7 @@ class simulator():
                 x = np.sqrt(r2_sq/self.r_soft_sq2)
                 acc_DM2 = -u.G_N*M2_eff*dx2*(r2_sq)**-1
                 inds = x < 1
-                if (np.sum(inds) > 1):
+                if (np.sum(inds) >= 1):
                     inds = inds.flatten()
                     acc_DM2[inds] = -u.G_N*M2_eff*dx2[inds,:]*x[inds]/(self.r_soft_sq2)
 
@@ -413,7 +411,7 @@ class simulator():
              x = np.sqrt(r1_sq/self.r_soft_sq1)
              acc_DM1 = -u.G_N*M1_eff*dx1*(r1_sq)**-1
              inds = x < 1
-             if (np.sum(inds) > 1):
+             if (np.sum(inds) >= 1):
                  inds = inds.flatten()
                  acc_DM1[inds] = -u.G_N*M1_eff*dx1[inds,:]*x[inds]*(8 - 9*x[inds] + 2*(x[inds])**3)/(self.r_soft_sq1)
 
@@ -421,7 +419,7 @@ class simulator():
              x = np.sqrt(r1_sq/self.r_soft_sq1)
              acc_DM1 = -u.G_N*M1_eff*dx1*(r1_sq)**-1
              inds = x < 1
-             if (np.sum(inds) > 1):
+             if (np.sum(inds) >= 1):
                  inds = inds.flatten()
                  acc_DM1[inds] = -u.G_N*M1_eff*dx1[inds,:]*x[inds]/(self.r_soft_sq1)
 
@@ -458,7 +456,7 @@ class simulator():
                  x = np.sqrt(r2_sq/self.r_soft_sq2)
                  acc_DM2 = -u.G_N*M2_eff*dx2*(r2_sq)**-1
                  inds = x < 1
-                 if (np.sum(inds) > 1):
+                 if (np.sum(inds) >= 1):
                      inds = inds.flatten()
                      acc_DM2[inds] = -u.G_N*M2_eff*dx2[inds,:]*x[inds]*(8 - 9*x[inds] + 2*(x[inds])**3)/(self.r_soft_sq2)
 
@@ -466,7 +464,7 @@ class simulator():
                  x = np.sqrt(r2_sq/self.r_soft_sq2)
                  acc_DM2 = -u.G_N*M2_eff*dx2*(r2_sq)**-1
                  inds = x < 1
-                 if (np.sum(inds) > 1):
+                 if (np.sum(inds) >= 1):
                      inds = inds.flatten()
                      acc_DM2[inds] = -u.G_N*M2_eff*dx2[inds,:]*x[inds]/(self.r_soft_sq2)
 
