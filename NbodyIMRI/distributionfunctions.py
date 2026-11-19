@@ -95,7 +95,7 @@ class SpikeDistribution(ABC):
         E_min = self.Psi(r_max)
         E_max = self.Psi(self.r_min)
         integ = lambda E: self.density_of_states_E(E)*self.f_ini(E)
-        E = tools.inverse_transform_sample(integ, E_min, E_max, N, N_grid=1000, log=True)
+        E = tools.inverse_transform_sample(integ, E_min, E_max, N, N_grid=10000, log=True)
         return E
     
     def draw_L(self, E, N = 1):
@@ -173,7 +173,7 @@ class GeneralizedNFWSpike(SpikeDistribution):
     
     """
 
-    def __init__(self, M_BH, rho_6, gamma_sp, r_t, alpha, r_soft = -1):
+    def __init__(self, M_BH, rho_6, gamma_sp, r_t, alpha, r_soft = -1, soft_method ="uniform"):
         
         self.M_BH   = M_BH
         self.rho_6  = rho_6
@@ -183,21 +183,30 @@ class GeneralizedNFWSpike(SpikeDistribution):
         
         self.r_isco = 6.0 * u.G_N * M_BH / u.c ** 2
         
-        #Strictly speaking, r_min should be 2*r_isco (https://arxiv.org/abs/1305.2619)
+        #Strictly speaking, r_min should be 2*r_s (https://arxiv.org/abs/1305.2619)
         self.r_min  = self.r_isco
         
         self.r_soft = r_soft
         self.softened = False
         if (r_soft > 0):
+            self.soft_method = soft_method
             self.softened = True
             self.f_ini_interp = self.tabulate_f()
         
 
     def Psi(self, r):
-        if (r >= self.r_soft):
-            return u.G_N * self.M_BH/r
+        if (self.softened):
+            if (self.soft_method == "plummer"):
+                return u.G_N * self.M_BH/np.sqrt(r**2 + self.r_soft**2)
+            elif (self.soft_method == "uniform"):
+                if (r >= self.r_soft):
+                    return u.G_N * self.M_BH/r
+                else:
+                    return (u.G_N * self.M_BH/self.r_soft)*(3*self.r_soft**2 - r**2)/(2*self.r_soft**2)
+            else:
+                raise ValueError("GeneralizedNFWSpike: soft_method " + self.soft_method + " not supported.")
         else:
-            return (u.G_N * self.M_BH/self.r_soft)*(3*self.r_soft**2 - r**2)/(2*self.r_soft**2)
+            return u.G_N*self.M_BH/r
     
     def tabulate_f(self):
         r_vals = np.geomspace(0.1, 1e9, 10000)*self.r_isco

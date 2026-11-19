@@ -47,7 +47,7 @@ class simulator():
     
     """
     
-    def __init__(self, particle_set, r_soft_sq2 = 0.0, r_soft_sq1 = -1, soft_method="empty_shell", check_state = None):
+    def __init__(self, particle_set, r_soft_sq2 = 0.0, r_soft_sq1 = -1, soft_method1="uniform", soft_method="empty_shell", check_state = None):
             
         self.p = copy.deepcopy(particle_set)
         self.r_soft_sq2 = r_soft_sq2
@@ -57,7 +57,7 @@ class simulator():
         self.soft_method = soft_method
         
         #Softening with the primary is always set to "uniform"    
-        self.soft_method1 = "uniform" 
+        self.soft_method1 = soft_method1
         self.check_state = check_state
         self.background_field = None
         
@@ -139,7 +139,7 @@ class simulator():
 
         #Calculate forces (including softening)
         if (self.soft_method1 == "plummer"):
-            acc_DM1 = -u.G_N*M1_eff*dx1*(r1_sq + self.r_soft_sq1)**-1
+            acc_DM1 = -u.G_N*M1_eff*dx1*r1*(r1_sq + self.r_soft_sq1)**(-3/2)
             
         elif (self.soft_method1 == "plummer2"):
             acc_DM1 = -u.G_N*M1_eff*r1*(dx1/2)*(2*r1_sq + 5*self.r_soft_sq1)*(r1_sq + self.r_soft_sq1)**(-5/2)
@@ -184,7 +184,7 @@ class simulator():
 
 
             if (self.soft_method == "plummer"):
-                acc_DM2 = -u.G_N*M2_eff*dx2*(r2_sq + self.r_soft_sq2)**-1
+                acc_DM2 = -u.G_N*M2_eff*dx2*r2*(r2_sq + self.r_soft_sq2)**(-3/2)
 
             elif (self.soft_method == "plummer2"):
                 acc_DM2 = -u.G_N*M2_eff*r2*(dx2/2)*(2*r2_sq + 5*self.r_soft_sq2)*(r2_sq + self.r_soft_sq2)**(-5/2)
