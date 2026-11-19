@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.special import gamma as Gamma_func
-from scipy.integrate import cumtrapz
+from scipy.integrate import cumulative_trapezoid as cumtrapz
 import sys
 
 from NbodyIMRI import tools
