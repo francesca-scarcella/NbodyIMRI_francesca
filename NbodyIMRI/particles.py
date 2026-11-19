@@ -119,9 +119,9 @@ class particles():
     def T_orb(self):
         a_i, e_i = self.orbital_elements()
         return tools.calc_Torb(a_i, self.M_tot())
-
-    def initialize_spike(self, rho_6=1e15*u.Msun/u.pc**3, gamma_sp=7/3, r_max=1e-6*u.pc, r_t=-1, alpha  = 2, circular=0, r_soft=-1, r_partition= -1):
-
+    
+    def initialize_spike(self, rho_6=1e15*u.Msun/u.pc**3, gamma_sp=7/3, r_max=1e-6*u.pc, r_t = -1, alpha  = 2, circular=0, r_soft=-1, r_partition=-1, soft_method="uniform"):
+        
         self.rho_6    = rho_6
         self.gamma_sp = gamma_sp
         self.r_t      = r_t
@@ -145,8 +145,8 @@ class particles():
             if (r_t < 0):
                 SpikeDF = DF.PowerLawSpike(M1_eff, rho_6, gamma_sp)
             else:
-                SpikeDF = DF.GeneralizedNFWSpike(M1_eff, rho_6, gamma_sp, r_t, alpha, r_soft)
-
+                SpikeDF = DF.GeneralizedNFWSpike(M1_eff, rho_6, gamma_sp, r_t, alpha, r_soft, soft_method)
+                
             r, v = SpikeDF.draw_particle(r_max, N = self.N_DM)
 
             for i in range(self.N_DM):
@@ -371,9 +371,9 @@ def load_particles_from_file(fileID, which="initial"):
 
     
     return p
-
-
-def single_BH(M_1, N_DM=0, rho_6=1e15*u.Msun/u.pc**3, gamma_sp=7/3, r_max=-1, r_t = -1, alpha = 2, circular=0, r_soft = -1, r_partition=-1):
+    
+    
+def single_BH(M_1, N_DM=0, rho_6=1e15*u.Msun/u.pc**3, gamma_sp=7/3, r_max=-1, r_t = -1, alpha = 2, circular=0, r_soft = -1, r_partition=-1, soft_method="uniform"):
     """
     Initialise a `particles` object which consists of a single BH surrounded by a DM halo.
 
@@ -403,7 +403,7 @@ def single_BH(M_1, N_DM=0, rho_6=1e15*u.Msun/u.pc**3, gamma_sp=7/3, r_max=-1, r_
         if (r_t < 0):
             SpikeDF = DF.PowerLawSpike(M_1, rho_6, gamma_sp)
         else:
-            SpikeDF = DF.GeneralizedNFWSpike(M_1, rho_6, gamma_sp, r_t, alpha, r_soft)
+            SpikeDF = DF.GeneralizedNFWSpike(M_1, rho_6, gamma_sp, r_t, alpha, r_soft, soft_method)
         M_spike = SpikeDF.M_DM_ini(r_max)
         M_DM    = (M_spike/N_DM)
     else:
@@ -412,13 +412,13 @@ def single_BH(M_1, N_DM=0, rho_6=1e15*u.Msun/u.pc**3, gamma_sp=7/3, r_max=-1, r_
     p = particles(M_1, M_2=0, N_DM=N_DM, M_DM=M_DM, dynamic_BH=False)
 
     if (N_DM > 0):
-        p.initialize_spike(rho_6, gamma_sp, r_max, r_t, alpha, circular, r_soft, r_partition)
-
+        p.initialize_spike(rho_6, gamma_sp, r_max, r_t, alpha, circular, r_soft, r_partition, soft_method)
+    
     return p
-
-
-
-def particles_in_binary(M_1, M_2, a_i, e_i=0.0, N_DM=0, dynamic_BH=True, rho_6=1e16*u.Msun/u.pc**3, gamma_sp=7/3, r_max=-1, r_t = -1, alpha = 2, circular = 0, include_DM_mass=False, r_soft = -1, r_partition=-1):
+    
+    
+    
+def particles_in_binary(M_1, M_2, a_i, e_i=0.0, N_DM=0, dynamic_BH=True, rho_6=1e16*u.Msun/u.pc**3, gamma_sp=7/3, r_max=-1, r_t = -1, alpha = 2, circular = 0, include_DM_mass=False, r_soft = -1, r_partition=-1, soft_method="uniform"):
     """
     Initialise a `particles` object which consists of a BH binary, which may be surrounded by a DM halo.
 
@@ -451,8 +451,8 @@ def particles_in_binary(M_1, M_2, a_i, e_i=0.0, N_DM=0, dynamic_BH=True, rho_6=1
         if (r_t < 0):
             SpikeDF = DF.PowerLawSpike(M_1, rho_6, gamma_sp)
         else:
-            SpikeDF = DF.GeneralizedNFWSpike(M_1, rho_6, gamma_sp, r_t, alpha, r_soft)
-
+            SpikeDF = DF.GeneralizedNFWSpike(M_1, rho_6, gamma_sp, r_t, alpha, r_soft, soft_method)
+            
         M_spike = SpikeDF.M_DM_ini(r_max)
         M_DM    = (M_spike/N_DM)
     else:
@@ -483,6 +483,6 @@ def particles_in_binary(M_1, M_2, a_i, e_i=0.0, N_DM=0, dynamic_BH=True, rho_6=1
     p.vBH2[:] = np.atleast_2d([0.0, -v_i*(1-factor), 0])
 
     if (N_DM > 0):
-        p.initialize_spike(rho_6, gamma_sp, r_max, r_t, alpha, circular, r_soft, r_partition)
-
+        p.initialize_spike(rho_6, gamma_sp, r_max, r_t, alpha, circular, r_soft, r_partition, soft_method)
+        
     return p
