@@ -820,15 +820,19 @@ class simulator():
 
 
         datatype = np.float64
-        self.t_data   = grp.create_dataset("t", (N_step,), dtype=datatype, compression="gzip")
-        self.M_1_data = grp.create_dataset("M_1", (N_step,), dtype=datatype, compression="gzip")
-        self.M_2_data = grp.create_dataset("M_2", (N_step,), dtype=datatype, compression="gzip")
+        # These arrays are rewritten in full at every save. They must NOT be compressed: a compressed array is stored
+        # in chunks, each rewrite allocates new chunks, and the space of the old ones is not reused while the file is
+        # open, so the file grew by ~57 kB per orbit (626 MB after 11000 orbits for 2 MB of data). Uncompressed arrays
+        # are overwritten in place and the file keeps its size.
+        self.t_data   = grp.create_dataset("t", (N_step,), dtype=datatype)
+        self.M_1_data = grp.create_dataset("M_1", (N_step,), dtype=datatype)
+        self.M_2_data = grp.create_dataset("M_2", (N_step,), dtype=datatype)
 
-        self.xBH1_data = grp.create_dataset("xBH1", (N_step,3), dtype=datatype, compression="gzip")
-        self.vBH1_data = grp.create_dataset("vBH1", (N_step,3), dtype=datatype, compression="gzip")
+        self.xBH1_data = grp.create_dataset("xBH1", (N_step,3), dtype=datatype)
+        self.vBH1_data = grp.create_dataset("vBH1", (N_step,3), dtype=datatype)
 
-        self.xBH2_data = grp.create_dataset("xBH2", (N_step,3), dtype=datatype, compression="gzip")
-        self.vBH2_data = grp.create_dataset("vBH2", (N_step,3), dtype=datatype, compression="gzip")
+        self.xBH2_data = grp.create_dataset("xBH2", (N_step,3), dtype=datatype)
+        self.vBH2_data = grp.create_dataset("vBH2", (N_step,3), dtype=datatype)
 
 
 
