@@ -3,7 +3,7 @@ from setuptools import setup
 #NIRMI!
 setup(
     name='NbodyIMRI',
-    version='0.1.0',    
+    version='0.2.0',
     description='A code for evolving the dynamics of intermediate mass ratio inspirals (IMRI), embedded in Dark Matter halos.',
     url='https://github.com/bradkav/NbodyIMRI',
     author='Bradley J Kavanagh',

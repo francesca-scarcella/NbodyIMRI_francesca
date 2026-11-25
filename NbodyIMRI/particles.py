@@ -42,13 +42,6 @@ class particles():
         self.xDM = np.zeros((N_DM, 3))
         self.vDM = np.zeros((N_DM, 3))
 
-        # define the variables that will contain the DM particels in the inner and outer region
-        self.xDM_in = None
-        self.vDM_in = None
-
-        self.xDM_out = None
-        self.vDM_out = None
-
         self.dvdtBH1 = None
         self.dvdtBH2 = None
 
@@ -56,8 +49,6 @@ class particles():
 
         #these are not really used?
         self.dxdtDM = None
-        self.dxdtDM_in = None
-        self.dxdtDM_out = None
 
         self.dynamic_BH = dynamic_BH
 
@@ -82,35 +73,6 @@ class particles():
             self.vBH1 += self.dvdtBH1*h
         self.vBH2 += self.dvdtBH2*h
         self.vDM += self.dvdtDM*h
-
-
-    #during the short steps, keep both the BHs fixed
-    # FIX (2026-11-19): during the short steps the black holes are no longer frozen.  Shadow copies of the two black
-    # holes (xBH1_in, ...), started from their state at the beginning of the main step, follow the two-body orbit with
-    # the same short steps, and the inner particles feel the black holes at those positions.  The real black-hole state
-    # is still the one advanced by the long step (which includes the force from the dark matter).
-    def xstep_in(self, h):
-        self.xDM_in += self.vDM_in*h
-        self.xBH1_in += self.vBH1_in*h
-        self.xBH2_in += self.vBH2_in*h
-
-    def vstep_in(self, h):
-        self.vDM_in += self.dvdtDM_in*h
-        self.vBH1_in += self.dvdtBH1_in*h
-        self.vBH2_in += self.dvdtBH2_in*h
-
-    #BH states are updated during long time step only
-    def xstep_out(self, h):
-        if (self.dynamic_BH):
-            self.xBH1 += self.vBH1*h
-        self.xBH2 += self.vBH2*h
-        self.xDM_out += self.vDM_out*h
-
-    def vstep_out(self, h):
-            if (self.dynamic_BH):
-                self.vBH1 += self.dvdtBH1*h
-            self.vBH2 += self.dvdtBH2*h
-            self.vDM_out += self.dvdtDM_out*h
 
 
     def orbital_elements(self):
@@ -192,15 +154,9 @@ class particles():
             self.xDM += self.xBH1
            # self.vDM += self.vBH1
 
-            #assign paricles to inner and outer arrays
+            #particles within r_partition of the primary (the simulator rebuilds this mask at every step)
             if self.r_partition > 0:
                 self.mask=tools.norm(self.xDM - self.xBH1)<self.r_partition
-
-            self.xDM_in=self.xDM[self.mask]
-            self.xDM_out=self.xDM[~self.mask]
-
-            self.vDM_in=self.vDM[self.mask]
-            self.vDM_out=self.vDM[~self.mask]
 
 
 

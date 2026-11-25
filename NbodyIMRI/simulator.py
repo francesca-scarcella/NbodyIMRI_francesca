@@ -31,8 +31,8 @@ chi = -0.6626458266981849e-01
 #NB: Deal with saving of M1 and M2 values for wheel and spoke
 
 
-# Marker of the version with the short steps split symmetrically around the long step (fix of 2026-11-25)
-SUBSTEP_SPLIT = "symmetric"
+# Time-stepping scheme of this version (2026-11-25). See simulator.full_step_split.
+SCHEME = "force_split"
 
 
 class simulator():
@@ -51,7 +51,7 @@ class simulator():
 
     """
     
-    def __init__(self, particle_set, r_soft_sq2 = 0.0, r_soft_sq1 = -1, soft_method1="uniform", soft_method="uniform", check_state = None):
+    def __init__(self, particle_set, r_soft_sq2 = 0.0, r_soft_sq1 = -1, soft_method1="uniform", soft_method="uniform", check_state = None, r_partition2 = -1, react_M1 = False):
             
         self.p = copy.deepcopy(particle_set)
         self.r_soft_sq2 = r_soft_sq2
@@ -62,6 +62,15 @@ class simulator():
         
         #Softening with the primary is always set to "uniform"    
         self.soft_method1 = soft_method1
+
+        # ---- sub-steps (used when run_simulation is called with N_step_partition > 1) ----
+        # The inner partition takes the short steps. It is made of the two black holes and of the particles within
+        #   p.r_partition  of the primary   (set when the particles are created), or
+        #   r_partition2   of the secondary (-1: one Hill radius, a (q/3)^(1/3), set at the start of the run; 0: off).
+        self.r_partition2 = r_partition2
+        # If True the primary feels the dark matter (every kick is applied as a pair). Default False, as in all runs so far:
+        # with the spike at rest in the centre-of-mass frame the primary moves through it, so this changes the physical setup.
+        self.react_M1 = react_M1
         self.check_state = check_state
         self.background_field = None
 
@@ -120,133 +129,14 @@ class simulator():
             self.p.xstep(xi*dt)
 
 
-    def full_step_in(self, dt, method="PEFRL"):
-        """
-        Perform a full leapfrog step on the inner particels only.
-        See e.g. https://arxiv.org/abs/2007.05308, http://physics.ucsc.edu/~peter/242/leapfrog.pdf
-
-        Parameters:
-            dt (float)      : size of the timestep (the leapfrog is made up of many sub-steps, with dt being the size of one full leapfrog step)
-            method (string) : leapfrog method to use. Options are: "DKD", "FR", "PEFRL" [default]. These corresponds to 2nd, 4th and 4th order methods.
-
-        Returns:
-            None
-
-        """
-        #print("taking a small step")
-
-        #2nd order 'standard' leapfrog
-        if (method == "DKD"):
-            self.p.xstep_in(0.5*dt)
-            self.update_acceleration_in()
-            self.p.vstep_in(1.0*dt)
-            self.p.xstep_in(0.5*dt)
-
-        #4th order Ruth-Forest (FR) leapfrog
-        elif (method == "FR"):
-            self.p.xstep_in(theta*dt/2)
-            self.update_acceleration_in()
-            self.p.vstep_in(theta*dt)
-            self.p.xstep_in((1-theta)*dt/2)
-            self.update_acceleration_in()
-            self.p.vstep_in((1-2*theta)*dt)
-            self.p.xstep_in((1-theta)*dt/2)
-            self.update_acceleration_in()
-            self.p.vstep_in(theta*dt)
-            self.p.xstep_in(theta*dt/2)
-
-        #Improved 4th order "Position Extended Forest-Ruth Like" (PEFRL) leapfrog
-        elif (method == "PEFRL"):
-            self.p.xstep_in(xi*dt)
-            self.update_acceleration_in()
-            self.p.vstep_in((1-2*lam)*dt/2)
-            self.p.xstep_in(chi*dt)
-            self.update_acceleration_in()
-            self.p.vstep_in(lam*dt)
-            self.p.xstep_in((1-2*(chi + xi))*dt)
-            self.update_acceleration_in()
-            self.p.vstep_in(lam*dt)
-            self.p.xstep_in(chi*dt)
-            self.update_acceleration_in()
-            self.p.vstep_in((1-2*lam)*dt/2)
-            self.p.xstep_in(xi*dt)
-
-        #print("took a small step")
-
-
-    def full_step_out(self, dt, method="PEFRL"):
-        """
-        Perform a full leapfrog step on the external particles and BHs. Forces on the BHs are obtained taking into account all DM particles (inner and outer regions)
-
-        See e.g. https://arxiv.org/abs/2007.05308, http://physics.ucsc.edu/~peter/242/leapfrog.pdf
-
-        Parameters:
-            dt (float)      : size of the timestep (the leapfrog is made up of many sub-steps, with dt being the size of one full leapfrog step)
-            method (string) : leapfrog method to use. Options are: "DKD", "FR", "PEFRL" [default]. These corresponds to 2nd, 4th and 4th order methods.
-
-        Returns:
-            None
-
-        """
-
-        #print("taking a big step")
-
-
-        #2nd order 'standard' leapfrog
-        if (method == "DKD"):
-            self.p.xstep_out(0.5*dt)
-            self.update_acceleration()
-            self.p.vstep_out(1.0*dt)
-            self.p.xstep_out(0.5*dt)
-
-        #4th order Ruth-Forest (FR) leapfrog
-        elif (method == "FR"):
-            self.p.xstep_out(theta*dt/2)
-            self.update_acceleration()
-            self.p.vstep_out(theta*dt)
-            self.p.xstep_out((1-theta)*dt/2)
-            self.update_acceleration()
-            self.p.vstep_out((1-2*theta)*dt)
-            self.p.xstep_out((1-theta)*dt/2)
-            self.update_acceleration()
-            self.p.vstep_out(theta*dt)
-            self.p.xstep_out(theta*dt/2)
-
-        #Improved 4th order "Position Extended Forest-Ruth Like" (PEFRL) leapfrog
-        elif (method == "PEFRL"):
-
-            self.p.xstep_out(xi*dt)
-            self.update_acceleration()
-            self.p.vstep_out((1-2*lam)*dt/2)
-            self.p.xstep_out(chi*dt)
-            self.update_acceleration()
-            self.p.vstep_out(lam*dt)
-            self.p.xstep_out((1-2*(chi + xi))*dt)
-            self.update_acceleration()
-            self.p.vstep_out(lam*dt)
-            self.p.xstep_out(chi*dt)
-            self.update_acceleration()
-            self.p.vstep_out((1-2*lam)*dt/2)
-            self.p.xstep_out(xi*dt)
-
-        #print("took a big step")
-
-
-
-
     def update_acceleration(self):
         """
-        Update the acceleration of all particles in p, based on current positions of the outer particles and BHs.
-        The positions of the inner particles are not updated within the main step.
+        Update the acceleration of all particles in p, based on the current positions. Used by full_step (no sub-steps).
 
 
         Returns:
             None
         """
-
-        #print("updating acceleration")
-        if self.N_partition>1:
-            self.p.xDM[~self.p.mask]= self.p.xDM_out
 
         #Calculate separations between DM particles and central BH
         dx1     = (self.p.xDM - self.p.xBH1)
@@ -374,158 +264,137 @@ class simulator():
             self.p.dvdtBH2 += self.background_field(self.p.xBH2)
             self.p.dvdtDM  += self.background_field(self.p.xDM)
 
-        if self.N_partition>1:
-            self.p.dvdtDM_out=self.p.dvdtDM[~self.p.mask]
+
+    def _softened_acceleration(self, dx, M, method, r_soft_sq):
+        """
+        Acceleration of particles at separation dx (N x 3) from a black hole of mass M, with the softening `method`.
+        Same expressions as in update_acceleration.
+        """
+        r    = np.linalg.norm(dx, axis=-1, keepdims=True)
+        r_sq = r**2
+        dxh  = dx/r                                                    # unit vectors
+
+        if (method == "plummer"):
+            return -u.G_N*M*dxh*r*(r_sq + r_soft_sq)**(-3/2)
+
+        elif (method == "plummer2"):
+            return -u.G_N*M*r*(dxh/2)*(2*r_sq + 5*r_soft_sq)*(r_sq + r_soft_sq)**(-5/2)
+
+        elif (method == "uniform_old"):
+            x   = np.sqrt(r_sq/r_soft_sq)
+            acc = -u.G_N*M*dxh/r_sq
+            inds = (x < 1).flatten()
+            if (np.sum(inds) >= 1):
+                acc[inds] = -u.G_N*M*dxh[inds,:]*x[inds]*(8 - 9*x[inds] + 2*(x[inds])**3)/r_soft_sq
+            return acc
+
+        elif (method == "uniform"):
+            x   = np.sqrt(r_sq/r_soft_sq)
+            acc = -u.G_N*M*dxh/r_sq
+            inds = (x < 1).flatten()
+            if (np.sum(inds) >= 1):
+                acc[inds] = -u.G_N*M*dxh[inds,:]*x[inds]/r_soft_sq
+            return acc
+
+        elif (method == "truncate"):
+            return -u.G_N*M*dxh/np.clip(r_sq, r_soft_sq, 1e50)
+
+        elif (method == "empty_shell"):
+            acc = -u.G_N*M*dxh/r_sq
+            inds = (np.sqrt(r_sq/r_soft_sq) < 1).flatten()
+            if (np.sum(inds) >= 1):
+                acc[inds] *= 0.0
+            return acc
+
+        raise ValueError("Invalid softening method:" + method)
 
 
-    def update_acceleration_in(self):
-         """
-         Update the acceleration of the inner set of particle particles in p, based on current positions.
+    def full_step_split(self, dt):
+        """
+        One main step with sub-steps (force-split scheme, 2026-11-25):
 
-         Returns:
-             None
-         """
+            K_out(dt/2)  [ short step of the inner partition ]^N  D_out(dt)  K_out(dt/2)
 
-         #Calculate separations between inner DM particles and central BH
-         dx1     = (self.p.xDM_in - self.p.xBH1_in)
-         r1      = np.linalg.norm(dx1, axis=-1, keepdims=True)
-         dx1    /= r1
-         r1_sq   = r1**2
+        Inner partition : the particles selected by self.p.mask AND the two black holes.
+        K_out           : kick from the interaction between the OUTER particles and the black holes, in both directions
+                          (the black holes kick the outer particles, the outer particles kick the black holes),
+                          all positions taken at the same time.
+        short step      : 4th-order (PEFRL) step of length dt/N of the inner particles and the black holes, with the forces
+                          of the black holes on the inner particles, of the inner particles on the black holes, and of the
+                          black holes on each other.
+        D_out           : free drift of the outer particles.
 
-         if (self.p.dynamic_BH):
-             M1_eff  = self.p.M_1
-             M2_eff  = self.p.M_2
-         else:
-             #M1_eff  = self.p.M_1
-             #M2_eff  = self.p.M_2
-             M1_eff  = self.p.M_1 + self.p.M_2
-             M2_eff  = (self.p.M_1*self.p.M_2)/(self.p.M_1 + self.p.M_2)
+        The outer drift may come after the short steps because the two do not involve the same coordinates.
+        Every force of the dark matter on a black hole is evaluated with both at the same time, so no partition lags the
+        other, and there are no shadow black holes: the real ones take the short steps.
+        The primary feels the dark matter only if self.react_M1 is True.
+        """
+        p = self.p
+        if not p.dynamic_BH:
+            raise ValueError("sub-steps need dynamic black holes")
+        if self.background_field is not None:
+            raise ValueError("sub-steps do not include a background field")
 
+        inner, outer = p.mask, ~p.mask
+        M_1, M_2 = p.M_1, p.M_2
+        m_in  = np.atleast_1d(p.M_DM)[inner][:, None]
+        m_out = np.atleast_1d(p.M_DM)[outer][:, None]
 
-         #Calculate forces (including softening)
-         if (self.soft_method1 == "plummer"):
-             acc_DM1 = -u.G_N*M1_eff*dx1*r1*(r1_sq + self.r_soft_sq1)**(-3/2)
+        def kick_outer(h):
+            "outer particles <-> black holes, as a pair"
+            x = p.xDM[outer]
+            a1 = self._softened_acceleration(x - p.xBH1, M_1, self.soft_method1, self.r_soft_sq1)
+            a2 = self._softened_acceleration(x - p.xBH2, M_2, self.soft_method,  self.r_soft_sq2)
+            p.vDM[outer] += (a1 + a2)*h
+            p.vBH2 = p.vBH2 - np.sum(m_out*a2, axis=0)/M_2*h
+            if self.react_M1:
+                p.vBH1 = p.vBH1 - np.sum(m_out*a1, axis=0)/M_1*h
 
-         elif (self.soft_method1 == "plummer2"):
-             acc_DM1 = -u.G_N*M1_eff*r1*(dx1/2)*(2*r1_sq + 5*self.r_soft_sq1)*(r1_sq + self.r_soft_sq1)**(-5/2)
+        # inner particles: work on copies, written back at the end
+        x_in = p.xDM[inner]
+        v_in = p.vDM[inner]
 
-         elif (self.soft_method1 == "uniform_old"):
-             x = np.sqrt(r1_sq/self.r_soft_sq1)
-             acc_DM1 = -u.G_N*M1_eff*dx1*(r1_sq)**-1
-             inds = x < 1
-             if (np.sum(inds) >= 1):
-                 inds = inds.flatten()
-                 acc_DM1[inds] = -u.G_N*M1_eff*dx1[inds,:]*x[inds]*(8 - 9*x[inds] + 2*(x[inds])**3)/(self.r_soft_sq1)
+        def drift_inner(h):
+            nonlocal x_in
+            x_in   = x_in + v_in*h
+            p.xBH1 = p.xBH1 + p.vBH1*h
+            p.xBH2 = p.xBH2 + p.vBH2*h
 
-         elif (self.soft_method1 == "uniform"):
-             x = np.sqrt(r1_sq/self.r_soft_sq1)
-             acc_DM1 = -u.G_N*M1_eff*dx1*(r1_sq)**-1
-             inds = x < 1
-             if (np.sum(inds) >= 1):
-                 inds = inds.flatten()
-                 acc_DM1[inds] = -u.G_N*M1_eff*dx1[inds,:]*x[inds]/(self.r_soft_sq1)
+        def kick_inner(h):
+            "inner particles <-> black holes as a pair, and the black holes on each other"
+            nonlocal v_in
+            a1 = self._softened_acceleration(x_in - p.xBH1, M_1, self.soft_method1, self.r_soft_sq1)
+            a2 = self._softened_acceleration(x_in - p.xBH2, M_2, self.soft_method,  self.r_soft_sq2)
+            dx12 = p.xBH1 - p.xBH2
+            r12  = np.sqrt(np.sum(dx12**2))
+            aBH1 = -u.G_N*M_2*dx12/r12**3
+            aBH2 = +u.G_N*M_1*dx12/r12**3 - np.sum(m_in*a2, axis=0)/M_2
+            if self.react_M1:
+                aBH1 = aBH1 - np.sum(m_in*a1, axis=0)/M_1
+            v_in   = v_in + (a1 + a2)*h
+            p.vBH1 = p.vBH1 + aBH1*h
+            p.vBH2 = p.vBH2 + aBH2*h
 
-         elif (self.soft_method1 == "truncate"):
-             r1_sq = np.clip(r1_sq, self.r_soft_sq1, 1e50)
-             acc_DM1 = -u.G_N*M1_eff*dx1/r1_sq
+        kick_outer(0.5*dt)
 
-         elif (self.soft_method1 == "empty_shell"):
-             x = np.sqrt(r1_sq/self.r_soft_sq1)
-             acc_DM1 = -u.G_N*M1_eff*dx1*(r1_sq)**-1
-             inds = x < 1
-             if (np.sum(inds) >= 1):
-                 inds = inds.flatten()
-                 acc_DM1[inds] *= 0.0
+        h = dt/self.N_partition
+        for it2 in range(self.N_partition):
+            drift_inner(xi*h)
+            kick_inner((1-2*lam)*h/2)
+            drift_inner(chi*h)
+            kick_inner(lam*h)
+            drift_inner((1-2*(chi + xi))*h)
+            kick_inner(lam*h)
+            drift_inner(chi*h)
+            kick_inner((1-2*lam)*h/2)
+            drift_inner(xi*h)
 
-         else:
-             raise ValueError("Invalid softening method:" + self.soft_method1)
+        p.xDM[inner] = x_in
+        p.vDM[inner] = v_in
 
-         #Calculate forces on second BH (if it exists)
-         if (self.p.M_2 > 0):
-             dx2     = (self.p.xDM_in - self.p.xBH2_in)
-             r2      = np.linalg.norm(dx2, axis=-1, keepdims=True)
-             dx2     /= r2
-             r2_sq   = r2**2
+        p.xDM[outer] += p.vDM[outer]*dt
 
-
-             if (self.soft_method == "plummer"):
-                 acc_DM2 = -u.G_N*M2_eff*dx2*r2*(r2_sq + self.r_soft_sq2)**(-3/2)
-
-             elif (self.soft_method == "plummer2"):
-                 acc_DM2 = -u.G_N*M2_eff*r2*(dx2/2)*(2*r2_sq + 5*self.r_soft_sq2)*(r2_sq + self.r_soft_sq2)**(-5/2)
-
-             elif (self.soft_method == "uniform_old"):
-                 x = np.sqrt(r2_sq/self.r_soft_sq2)
-                 acc_DM2 = -u.G_N*M2_eff*dx2*(r2_sq)**-1
-                 inds = x < 1
-                 if (np.sum(inds) >= 1):
-                     inds = inds.flatten()
-                     acc_DM2[inds] = -u.G_N*M2_eff*dx2[inds,:]*x[inds]*(8 - 9*x[inds] + 2*(x[inds])**3)/(self.r_soft_sq2)
-
-             elif (self.soft_method == "uniform"):
-                 x = np.sqrt(r2_sq/self.r_soft_sq2)
-                 acc_DM2 = -u.G_N*M2_eff*dx2*(r2_sq)**-1
-                 inds = x < 1
-                 if (np.sum(inds) >= 1):
-                     inds = inds.flatten()
-                     acc_DM2[inds] = -u.G_N*M2_eff*dx2[inds,:]*x[inds]/(self.r_soft_sq2)
-
-             elif (self.soft_method == "truncate"):
-                 r2_sq = np.clip(r2_sq, self.r_soft_sq2, 1e50)
-                 acc_DM2 = -u.G_N*M2_eff*dx2/r2_sq
-
-             elif (self.soft_method == "empty_shell"):
-                 x = np.sqrt(r2_sq/self.r_soft_sq2)
-                 acc_DM2 = -u.G_N*M2_eff*dx2*(r2_sq)**-1
-                 inds = x < 1
-                 if (np.sum(inds) >= 1):
-                     inds = inds.flatten()
-                     acc_DM2[inds] *= 0.0
-
-             else:
-                 raise ValueError("Invalid softening method:" + self.soft_method)
-
-             #Calculate forces between the 2 BHs
-             #dx12    = (self.p.xBH1 - self.p.xBH2)
-             #r12_sq  = np.linalg.norm(dx12, axis=-1, keepdims=True)**2
-             #acc_BH = -u.G_N*M2_eff*dx12*(r12_sq)**-1.5
-         else:
-             #acc_BH = 0.0
-             acc_DM2 = 0.0
-
-         #Save the values of the acceleration
-         #if (self.p.dynamic_BH):
-             #Acceleration of central BH due only to m2
-             #self.p.dvdtBH1 = acc_BH #- (1/M1_eff)*np.sum(np.atleast_2d(self.p.M_DM).T*acc_DM1, axis=0)
-         #else:
-             #self.p.dvdtBH1 = 0.0
-
-         #if (self.p.M_2 > 0):
-            # self.p.dvdtBH2 = -(M1_eff/M2_eff)*acc_BH - (1/M2_eff)*np.sum(np.atleast_2d(self.p.M_DM).T*acc_DM2, axis=0)
-         #else:
-        #     self.p.dvdtBH2 = 0.0
-
-         self.p.dvdtDM_in  = acc_DM1 + acc_DM2
-
-         #FIX (2026-11-19): two-body acceleration of the shadow black holes used during the short steps
-         dx12_in  = (self.p.xBH1_in - self.p.xBH2_in)
-         r12_in   = np.sqrt(np.sum(dx12_in**2))
-         if (self.p.M_2 <= 0):
-             self.p.dvdtBH1_in = 0.0*dx12_in
-             self.p.dvdtBH2_in = 0.0*dx12_in
-         elif (self.p.dynamic_BH):
-             self.p.dvdtBH1_in = -u.G_N*self.p.M_2*dx12_in/r12_in**3
-             self.p.dvdtBH2_in = +u.G_N*self.p.M_1*dx12_in/r12_in**3
-         else:
-             self.p.dvdtBH1_in = 0.0*dx12_in
-             self.p.dvdtBH2_in = +u.G_N*(self.p.M_1 + self.p.M_2)*dx12_in/r12_in**3
-
-         #Now, if a background force field has been set, calculate the acceleration
-         if self.background_field is not None:
-             #self.p.dvdtBH1 += self.background_field(self.p.xBH1)
-             #self.p.dvdtBH2 += self.background_field(self.p.xBH2)
-             self.p.dvdtDM_in  += self.background_field(self.p.xDM_in)
-
+        kick_outer(0.5*dt)
 
 
     def run_simulation(self, dt, t_end, method="PEFRL", save_to_file = False, add_to_list = False, show_progress=False, save_DM_states=False, N_save=1, label=None, N_step_partition=1, IDhash=None):
@@ -569,9 +438,12 @@ class simulator():
 
         self.N_partition=N_step_partition
         if self.N_partition > 1:
-            print("sub-steps: symmetric split around the long step (lag fix, SUBSTEP_SPLIT =", SUBSTEP_SPLIT, ")")
-            if self.N_partition % 2 == 1:
-                print("WARNING: N_step_partition is odd; use an even number so that the split is exactly symmetric")
+            if self.r_partition2 < 0:
+                #default: one Hill radius of the secondary
+                self.r_partition2 = self.p.orbital_elements()[0]*(self.p.M_2/(3*self.p.M_1))**(1./3.)
+            print("sub-steps: force split, SCHEME =", SCHEME,
+                  "| sub-step region around M2:", ("off" if self.r_partition2 <= 0 else "%.3f a_i" % (self.r_partition2/self.p.orbital_elements()[0])),
+                  "| primary feels the dark matter:", self.react_M1)
 
         if self.p.r_partition==-1:
             self.p.r_partition=9*self.r_soft
@@ -709,63 +581,12 @@ class simulator():
 
             #Step forward by dt
             if self.N_partition>1:
-                #perform smaller time steps in the inner volume
-
+                #the inner partition: the particles near M1 (and near M2 if r_partition2 > 0), together with the black holes
                 if (it%N_update_mask == 0):
-
-                    #select the particles to be followed in HR
-                    self.p.mask=tools.norm(self.p.xDM - self.p.xBH1)<self.p.r_partition
-                    #print("updated the mask")
-
-                    self.p.xDM_in=self.p.xDM[self.p.mask]
-                    self.p.xDM_out=self.p.xDM[~self.p.mask]
-
-                    self.p.vDM_in=self.p.vDM[self.p.mask]
-                    self.p.vDM_out=self.p.vDM[~self.p.mask]
-                    #print("selected particles")
-
-                #FIX (2026-11-19): black-hole state at the beginning of the main step, for the short steps
-                self.p.xBH1_in = 1.0*self.p.xBH1
-                self.p.vBH1_in = 1.0*self.p.vBH1
-                self.p.xBH2_in = 1.0*self.p.xBH2
-                self.p.vBH2_in = 1.0*self.p.vBH2
-
-                #FIX (2026-11-25): the short steps are split symmetrically around the long step.
-                # Before: the long step (black holes + outer particles) was taken first, with the inner particles frozen at
-                # their positions of the START of the step, and the short steps came after. The inner cusp was then always
-                # half a step behind M1 when its pull on M2 was evaluated: a steady forward force on M2 with nothing acting
-                # back on M1, i.e. a constant energy gain of the binary (measured: 2e-2 rho a^3 G M1/a per orbit at M2 = 7).
-                # Now: half of the short steps, then the long step with the inner particles at their MID-step positions,
-                # then the other half. The lag is +-half a step around the middle and cancels to first order.
-                # The shadow black holes run continuously through both halves, from the state at the start of the step.
-                n_first = self.N_partition//2
-
-                for it2 in range(n_first):
-                    #short time steps for the inner ones: first half
-                    self.full_step_in(dt/self.N_partition, method)
-
-                #the long step sees the inner particles at mid-step
-                self.p.xDM[self.p.mask] = self.p.xDM_in
-
-                #normal time step for the external particles and the BHs
-                self.full_step_out(dt, method)
-
-                for it2 in range(self.N_partition - n_first):
-                    #short time steps for the inner ones: second half
-                    self.full_step_in(dt/self.N_partition, method)
-
-
-                #copy the updated coordinates back into the main arrays
-
-                self.p.xDM[self.p.mask]=self.p.xDM_in
-                self.p.xDM[~self.p.mask]=self.p.xDM_out
-
-                self.p.vDM[self.p.mask]=self.p.vDM_in
-                self.p.vDM[~self.p.mask]=self.p.vDM_out
-
-                #print("updated positions and velocities")
-
-
+                    self.p.mask = tools.norm(self.p.xDM - self.p.xBH1) < self.p.r_partition
+                    if self.r_partition2 > 0:
+                        self.p.mask = self.p.mask | (tools.norm(self.p.xDM - self.p.xBH2) < self.r_partition2)
+                self.full_step_split(dt)
 
             else:
 
@@ -779,12 +600,6 @@ class simulator():
             #check_state function has some idea about how far in the simulation we are...)
             self.current_step += 1
 
-
-        #copy the DM coordinates into the main arrays
-        if self.N_partition>1:
-
-            #self.p.xDM[self.p.mask]=self.p.xDM_in
-            self.p.xDM[~self.p.mask]=self.p.xDM_out
 
         #One final update of the output data
         if (save_to_file):
@@ -837,6 +652,9 @@ class simulator():
         grp.attrs['N_DM'] = self.p.N_DM
         grp.attrs['M_DM'] = self.p.M_DM[0]/u.Msun
         grp.attrs['r_soft'] = np.sqrt(self.r_soft_sq2)/u.pc
+        grp.attrs['scheme'] = SCHEME
+        grp.attrs['r_partition2'] = max(self.r_partition2, 0.0)/u.pc
+        grp.attrs['react_M1'] = int(self.react_M1)
         grp.attrs['r_partition'] = self.p.r_partition/u.pc
         if (self.p.dynamic_BH):
             grp.attrs['dynamic'] = 1
