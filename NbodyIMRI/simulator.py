@@ -31,6 +31,10 @@ chi = -0.6626458266981849e-01
 #NB: Deal with saving of M1 and M2 values for wheel and spoke
 
 
+# Marker of the version with the short steps split symmetrically around the long step (fix of 2026-11-25)
+SUBSTEP_SPLIT = "symmetric"
+
+
 class simulator():
     """
     Class for evolving the N-body system.
@@ -564,6 +568,10 @@ class simulator():
 
 
         self.N_partition=N_step_partition
+        if self.N_partition > 1:
+            print("sub-steps: symmetric split around the long step (lag fix, SUBSTEP_SPLIT =", SUBSTEP_SPLIT, ")")
+            if self.N_partition % 2 == 1:
+                print("WARNING: N_step_partition is odd; use an even number so that the split is exactly symmetric")
 
         if self.p.r_partition==-1:
             self.p.r_partition=9*self.r_soft
@@ -722,11 +730,28 @@ class simulator():
                 self.p.xBH2_in = 1.0*self.p.xBH2
                 self.p.vBH2_in = 1.0*self.p.vBH2
 
+                #FIX (2026-11-25): the short steps are split symmetrically around the long step.
+                # Before: the long step (black holes + outer particles) was taken first, with the inner particles frozen at
+                # their positions of the START of the step, and the short steps came after. The inner cusp was then always
+                # half a step behind M1 when its pull on M2 was evaluated: a steady forward force on M2 with nothing acting
+                # back on M1, i.e. a constant energy gain of the binary (measured: 2e-2 rho a^3 G M1/a per orbit at M2 = 7).
+                # Now: half of the short steps, then the long step with the inner particles at their MID-step positions,
+                # then the other half. The lag is +-half a step around the middle and cancels to first order.
+                # The shadow black holes run continuously through both halves, from the state at the start of the step.
+                n_first = self.N_partition//2
+
+                for it2 in range(n_first):
+                    #short time steps for the inner ones: first half
+                    self.full_step_in(dt/self.N_partition, method)
+
+                #the long step sees the inner particles at mid-step
+                self.p.xDM[self.p.mask] = self.p.xDM_in
+
                 #normal time step for the external particles and the BHs
                 self.full_step_out(dt, method)
 
-                for it2 in range(self.N_partition):
-                    #short time steps for the inner ones
+                for it2 in range(self.N_partition - n_first):
+                    #short time steps for the inner ones: second half
                     self.full_step_in(dt/self.N_partition, method)
 
 
